@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  actions: write # Grant write permission for actions
+  contents: read # Assuming you need to read contents, adjust as necessary
+
 jobs:
   call_unified_ci:
     name: Call Unified CI Workflow
