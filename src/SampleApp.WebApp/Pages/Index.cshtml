@@ -1,0 +1,36 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "My Entities";
+}
+
+<div class="text-center">
+    <h1 class="display-4">My Entities</h1>
+</div>
+
+@if (Model.MyEntities.Any())
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entity in Model.MyEntities)
+            {
+                <tr>
+                    <td>@entity.Id</td>
+                    <td>@entity.Name</td>
+                    <td>@entity.Description</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <p>No entities found in the database.</p>
+}

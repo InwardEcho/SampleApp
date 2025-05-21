@@ -1,0 +1,62 @@
+name: Deploy Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_to_deploy:
+        description: 'Target environment (e.g., dev, prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      app_build_source_branch:
+        description: 'Source branch of the artifact to deploy (e.g., main, develop, feature/xyz)'
+        required: true
+        type: string
+        default: 'main'
+      # app_build_artifact_run_id:
+      #   description: 'Optional: Specific run ID of "CI Build and Test" workflow to deploy artifact from'
+      #   required: false
+      #   type: string
+
+jobs:
+  deploy_environment_with_orchestrator:
+    name: Deploy to ${{ inputs.environment_to_deploy }}
+    uses: InwardEcho/.github/.github/workflows/org-environment-orchestrator.yml@main # Updated path
+    with:
+      environment_name: ${{ inputs.environment_to_deploy }}
+      application_name: 'SampleApp'
+      app_build_artifact_name_pattern: 'SampleApp-deployment-package'
+      app_build_source_branch: ${{ inputs.app_build_source_branch }}
+      # app_build_artifact_run_id: ${{ inputs.app_build_artifact_run_id }}
+
+      # IaC Stage Inputs for the Orchestrator
+      # These refs are for documentation; orchestrator uses its internal defaults.
+      iac_org_template_ref: 'InwardEcho/.github/.github/workflows/org-iac-terraform.yml@main'
+      iac_working_directory: './infra'
+      iac_variables_file_path_pattern: './infra/{env}.tfvars'
+      iac_backend_config_file_path_pattern: './infra/{env}.backend.hcl'
+      iac_cloud_provider: 'azure'
+      iac_azure_credentials_secret_name: 'AZURE_CREDENTIALS_TF' # Orchestrator will use the secret passed as AZURE_CREDENTIALS_TF
+
+      # Database Migration Stage Inputs for the Orchestrator
+      db_migration_org_template_ref: 'InwardEcho/.github/.github/workflows/org-database-migration-efcore.yml@main'
+      db_migration_efcore_project_path: './src/SampleApp.WebApp'
+      db_connection_string_source: 'keyVault'
+      db_azure_credentials_secret_name_for_kv: 'AZURE_CREDENTIALS_KV' # Orchestrator will use the secret passed as AZURE_CREDENTIALS_KV
+
+      # Application Deployment Stage Inputs for the Orchestrator
+      app_deploy_org_template_ref: 'InwardEcho/.github/.github/workflows/org-deploy-azure-app-service.yml@main'
+      app_deploy_azure_credentials_secret_name: 'AZURE_CREDENTIALS_APP' # Orchestrator will use the secret passed as AZURE_CREDENTIALS_APP
+
+      version_tag: ${{ github.sha }}
+
+    secrets:
+      # These are the secrets this calling workflow makes available to the orchestrator.
+      # The orchestrator's *azure_credentials_secret_name inputs tell it which of these to use.
+      AZURE_CREDENTIALS_TF: ${{ secrets.AZURE_CREDENTIALS_TF }}
+      AZURE_CREDENTIALS_KV: ${{ secrets.AZURE_CREDENTIALS_KV }}
+      AZURE_CREDENTIALS_APP: ${{ secrets.AZURE_CREDENTIALS_APP }}
+      # If db_connection_string_source were 'secret', you would also pass:
+      # DB_CONNECTION_STRING_INPUT_SECRET: ${{ secrets.YOUR_ACTUAL_DB_CONN_STRING_SECRET_FOR_THIS_ENV }}
