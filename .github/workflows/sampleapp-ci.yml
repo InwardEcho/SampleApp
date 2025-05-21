@@ -1,0 +1,22 @@
+name: SampleApp CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  call_unified_ci:
+    name: Call Unified CI Workflow
+    uses: InwardEcho/workflow-templates/.github/workflows/ci-unified.yml@main
+    with:
+      logLevel: 'info' # Or your preferred log level
+      # solution_path: 'SampleApp.sln' # Optional: if different from default in reusable
+      # dotnet_version_to_use: '8.0.x' # Optional: if different from default
+    secrets:
+      WORKFLOW_DISPATCH_PAT: ${{ secrets.WORKFLOW_DISPATCH_PAT }} # Required for triggering CD
+      NUGET_FEED_AUTH_TOKEN_CI: ${{ secrets.NUGET_FEED_AUTH_TOKEN_CI }} # Optional
+      SLACK_WEBHOOK_URL_CI: ${{ secrets.SLACK_WEBHOOK_URL_CI }} # Optional
