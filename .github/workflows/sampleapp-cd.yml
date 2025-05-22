@@ -38,7 +38,7 @@ jobs:
     # - For a workflow in the same repository: ./.github/workflows/path/to/unified-cd-workflow.yml
     # The path provided in the prompt ('/Users/waqas.ittar/Desktop/source/workflow-templates/.github/workflows/unified-cd-workflow.yml')
     # is an absolute local path and cannot be used directly by GitHub Actions.
-    uses: nwardEcho/workflow-templates/.github/workflows/unified-cd-workflow.yml@main # FIXME: Update this path
+    uses: InwardEcho/workflow-templates/.github/workflows/unified-cd-workflow.yml@main # FIXME: Update this path
 
     with:
       # Core inputs from workflow_dispatch
