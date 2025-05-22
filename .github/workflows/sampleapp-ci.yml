@@ -2,11 +2,16 @@ name: SampleApp CI
 
 on:
   push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  actions: write # Grant write permission for actions
+  contents: read # Assuming you need to read contents, adjust as necessary
+#   id-token: write # Added to support potential OIDC token requirements in the reusable workflow
+  packages: read # Added to support potential package read operations in the reusable workflow
 
 jobs:
   call_unified_ci:
@@ -14,6 +19,8 @@ jobs:
     uses: InwardEcho/workflow-templates/.github/workflows/ci-unified.yml@main
     with:
       logLevel: 'info' # Or your preferred log level
+      enable_cd: true
+      cd_workflow: '.github/workflows/sampleapp-cd.yml'
       # solution_path: 'SampleApp.sln' # Optional: if different from default in reusable
       # dotnet_version_to_use: '8.0.x' # Optional: if different from default
     secrets:
