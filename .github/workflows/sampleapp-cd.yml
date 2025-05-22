@@ -100,105 +100,145 @@ jobs:
           echo "Using Artifact: $ARTIFACT_NAME"
           echo "Is Main Pipeline (for DEV trigger): $IS_MAIN_PIPELINE"
 
-  deploy_and_validate:
-    name: Deploy to ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
-    runs-on: ubuntu-latest
+  apply_infrastructure:
+    name: Apply Infrastructure (Terraform)
     needs: prepare_deployment_info
-    environment:
-      name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
-      url: ${{ vars[needs.prepare_deployment_info.outputs.environment_url_var_name] || format('https://{0}.example.com/app-{1}', github.event.inputs.target_environment_type, needs.prepare_deployment_info.outputs.version) }}
+    uses: InwardEcho/workflow-templates/.github/workflows/reusable-iac-terraform.yml@main
+    with:
+      working-directory: 'infra'
+      terraform-command: 'apply'
+      environment: ${{ github.event.inputs.target_environment_type }}
+      var-file: '${{ github.event.inputs.target_environment_type }}.tfvars'
+      backend-config-file: '${{ github.event.inputs.target_environment_type }}.backend.hcl'
+      apply-auto-approve: ${{ github.event.inputs.target_environment_type == 'prod' && 'false' || 'true' }}
+      terraform-version: 'latest'
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
-    outputs: # Output for observability
-      deployment_status: ${{ steps.app_deploy_prod_canary.outputs.status || steps.app_deploy_non_prod.outputs.status || 'unknown' }}
-      canary_outcome: ${{ steps.app_deploy_prod_canary.outputs.canary_status || 'N/A' }}
+  apply_database_migrations:
+    name: Apply Database Migrations
+    needs: [prepare_deployment_info, apply_infrastructure]
+    if: needs.apply_infrastructure.outputs.status == 'success' # Reusable workflow output
+    uses: InwardEcho/workflow-templates/.github/workflows/reusable-database-migration-efcore.yml@main
+    with:
+      efcore-project-path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj'
+      environment: ${{ github.event.inputs.target_environment_type }}
+      connection-string: ${{ secrets.DB_CONNECTION_STRING }}
+      backup-required: ${{ github.event.inputs.target_environment_type == 'prod' && 'true' || 'false' }}
+    secrets:
+      _placeholder_for_secret_passing_to_reusable: "Ensure reusable workflow handles this correctly if it expects secrets directly"
+      # If DB_CONNECTION_STRING is expected as a secret by the reusable workflow, it should be here.
+      # For now, keeping it in `with` as per original, assuming reusable workflow input handles `secrets.*` context.
 
+  deploy_application_prod:
+    name: Deploy Application to PROD (Canary) | ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+    needs: [prepare_deployment_info, apply_database_migrations]
+    if: needs.apply_database_migrations.outputs.status == 'success' && github.event.inputs.target_environment_type == 'prod' # Reusable workflow output
+    # environment:
+    #   name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+    #   url: ${{ vars[needs.prepare_deployment_info.outputs.environment_url_var_name] || format('https://{0}.example.com/app-{1}', github.event.inputs.target_environment_type, needs.prepare_deployment_info.outputs.version) }}
+    uses: InwardEcho/workflow-templates/.github/workflows/reusable-canary-deployment.yml@main
+    with:
+      environment-name: 'prod'
+      artifact-path: './app-to-deploy' # This path is relative to the reusable workflow's execution context.
+                                       # The reusable workflow might need inputs like `source_artifact_name` to download it.
+      source_artifact_name: ${{ needs.prepare_deployment_info.outputs.artifact_name }} # Added, assuming reusable workflow uses it
+      version: ${{ needs.prepare_deployment_info.outputs.version }}
+      canary-percentage: ${{ vars.PROD_CANARY_PERCENTAGE || 10 }}
+      observation-period-minutes: ${{ vars.PROD_CANARY_OBSERVATION_MINUTES || 30 }}
+      health-check-url-pattern: ${{ vars.PROD_CANARY_HEALTH_CHECK_URL_PATTERN }}
+      primary-deployment-target-type: 'azure-app-service'
+      azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
+      rollback-on-failure: true
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
 
+  deploy_application_non_prod:
+    name: Deploy Application to ${{ github.event.inputs.target_environment_type }} (Direct) | ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+    needs: [prepare_deployment_info, apply_database_migrations]
+    if: needs.apply_database_migrations.outputs.status == 'success' && (github.event.inputs.target_environment_type == 'dev' || github.event.inputs.target_environment_type == 'test') # Reusable workflow output
+    # environment:
+    #   name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+    #   url: ${{ vars[needs.prepare_deployment_info.outputs.environment_url_var_name] || format('https://{0}.example.com/app-{1}', github.event.inputs.target_environment_type, needs.prepare_deployment_info.outputs.version) }}
+    uses: InwardEcho/workflow-templates/.github/workflows/reusable-deploy-environment.yml@main
+    with:
+      environment-name: ${{ github.event.inputs.target_environment_type }}
+      artifact-path: './app-to-deploy' # Similar to prod, reusable workflow context.
+      source_artifact_name: ${{ needs.prepare_deployment_info.outputs.artifact_name }} # Added, assuming reusable workflow uses it
+      deployment-target-type: 'azure-app-service'
+      version-being-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
+      azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
+
+  gather_deployment_outputs:
+    name: Gather Deployment Outputs
+    runs-on: ubuntu-latest
+    needs: [prepare_deployment_info, apply_infrastructure, apply_database_migrations, deploy_application_prod, deploy_application_non_prod]
+    if: always()
+    outputs:
+      deployment_status: ${{ steps.get_outputs.outputs.deployment_status }}
+      canary_outcome: ${{ steps.get_outputs.outputs.canary_outcome }}
+      overall_job_result: ${{ steps.get_outputs.outputs.overall_job_result }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Determine deployment status and canary outcome
+        id: get_outputs
+        shell: bash
+        run: |
+          DEPLOYMENT_STATUS="unknown"
+          CANARY_OUTCOME="N/A"
+          OVERALL_JOB_RESULT="unknown"
 
-      - name: Download Application Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.prepare_deployment_info.outputs.artifact_name }}
-          path: ./app-to-deploy
+          # Determine overall job result first based on the sequence
+          if [[ "${{ needs.apply_infrastructure.result }}" == "failure" || "${{ needs.apply_infrastructure.result }}" == "cancelled" ]]; then
+            OVERALL_JOB_RESULT="${{ needs.apply_infrastructure.result }}"
+          elif [[ "${{ needs.apply_database_migrations.result }}" == "failure" || "${{ needs.apply_database_migrations.result }}" == "cancelled" ]]; then
+            OVERALL_JOB_RESULT="${{ needs.apply_database_migrations.result }}"
+          elif [[ "${{ github.event.inputs.target_environment_type }}" == "prod" ]]; then
+            OVERALL_JOB_RESULT="${{ needs.deploy_application_prod.result }}"
+            # Only get deployment status if the job was supposed to run and did not fail before app deployment
+            if [[ "${{ needs.deploy_application_prod.result }}" != "skipped" && "${{ needs.deploy_application_prod.result }}" != "" ]]; then
+              DEPLOYMENT_STATUS="${{ needs.deploy_application_prod.outputs.status || 'unknown' }}"
+              CANARY_OUTCOME="${{ needs.deploy_application_prod.outputs.canary_status || 'N/A' }}"
+            fi
+          elif [[ "${{ github.event.inputs.target_environment_type }}" == "dev" || "${{ github.event.inputs.target_environment_type }}" == "test" ]]; then
+            OVERALL_JOB_RESULT="${{ needs.deploy_application_non_prod.result }}"
+            if [[ "${{ needs.deploy_application_non_prod.result }}" != "skipped" && "${{ needs.deploy_application_non_prod.result }}" != "" ]]; then
+              DEPLOYMENT_STATUS="${{ needs.deploy_application_non_prod.outputs.status || 'unknown' }}"
+            fi
+          fi
+          
+          # If overall result is still unknown (e.g. all dependent jobs skipped), set to skipped
+          if [[ "$OVERALL_JOB_RESULT" == "unknown" ]]; then
+             # This case should ideally not be hit if logic is correct and at least one path executes or fails.
+             # Default to success if all prior needs were skipped and this job itself is fine.
+             # However, this job `if: always()` so it runs. If all needs were skipped, result should be skipped.
+             # Let's refine: if all critical path jobs were skipped, this job's "overall_job_result" should reflect that.
+             # The logic above should handle this by setting OVERALL_JOB_RESULT to the result of the last relevant job in the chain.
+             # If all needs are skipped, OVERALL_JOB_RESULT would be 'skipped' from the last relevant needs check.
+             echo "Warning: Fallback for OVERALL_JOB_RESULT. This might indicate an issue in logic."
+             # OVERALL_JOB_RESULT="skipped" # A more robust default might be needed.
+          fi
 
-      - name: Apply Infrastructure (Terraform)
-        id: terraform_apply
-        uses: InwardEcho/workflow-templates/.github/workflows/reusable-iac-terraform.yml@main
-        with:
-          working-directory: 'infra' # Adjusted for SampleApp
-          terraform-command: 'apply'
-          environment: ${{ github.event.inputs.target_environment_type }}
-          var-file: '${{ github.event.inputs.target_environment_type }}.tfvars' # Adjusted for SampleApp
-          backend-config-file: '${{ github.event.inputs.target_environment_type }}.backend.hcl' # Adjusted for SampleApp
-          apply-auto-approve: ${{ github.event.inputs.target_environment_type == 'prod' && 'false' || 'true' }}
-          terraform-version: 'latest'
-        secrets:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      - name: Apply Database Migrations
-        id: db_migration
-        if: steps.terraform_apply.outputs.status == 'success'
-        uses: InwardEcho/workflow-templates/.github/workflows/reusable-database-migration-efcore.yml@main
-        with:
-          efcore-project-path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj' # Adjusted for SampleApp
-          environment: ${{ github.event.inputs.target_environment_type }}
-          connection-string: ${{ secrets.DB_CONNECTION_STRING }}
-          backup-required: ${{ github.event.inputs.target_environment_type == 'prod' && 'true' || 'false' }}
-        secrets:
-          _placeholder_for_secret_passing_to_reusable: "Ensure reusable workflow handles this correctly if it expects secrets directly"
-
-      - name: Placeholder for App Deploy Logic (before conditional steps)
-        id: app_deploy_placeholder
-        if: steps.db_migration.outputs.status == 'success'
-        run: echo "DB migration successful, proceeding to app deployment logic."
-
-      - name: Deploy Application to PROD (Canary Strategy)
-        id: app_deploy_prod_canary
-        if: steps.app_deploy_placeholder.conclusion == 'success' && github.event.inputs.target_environment_type == 'prod'
-        uses: InwardEcho/workflow-templates/.github/workflows/reusable-canary-deployment.yml@main
-        with:
-          environment-name: 'prod'
-          artifact-path: './app-to-deploy'
-          version: ${{ needs.prepare_deployment_info.outputs.version }}
-          canary-percentage: ${{ vars.PROD_CANARY_PERCENTAGE || 10 }}
-          observation-period-minutes: ${{ vars.PROD_CANARY_OBSERVATION_MINUTES || 30 }}
-          health-check-url-pattern: ${{ vars.PROD_CANARY_HEALTH_CHECK_URL_PATTERN }}
-          primary-deployment-target-type: 'azure-app-service' # Example, adjust as needed
-          azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
-          rollback-on-failure: true
-        secrets:
-          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
-
-      - name: Deploy Application to DEV/TEST (Direct Strategy)
-        id: app_deploy_non_prod
-        if: steps.app_deploy_placeholder.conclusion == 'success' && (github.event.inputs.target_environment_type == 'dev' || github.event.inputs.target_environment_type == 'test')
-        uses: InwardEcho/workflow-templates/.github/workflows/reusable-deploy-environment.yml@main
-        with:
-          environment-name: ${{ github.event.inputs.target_environment_type }}
-          artifact-path: './app-to-deploy'
-          deployment-target-type: 'azure-app-service' # Example, adjust as needed
-          version-being-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
-          azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
-        secrets:
-          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
+          echo "deployment_status=$DEPLOYMENT_STATUS" >> $GITHUB_OUTPUT
+          echo "canary_outcome=$CANARY_OUTCOME" >> $GITHUB_OUTPUT
+          echo "overall_job_result=$OVERALL_JOB_RESULT" >> $GITHUB_OUTPUT
 
   trigger_next_stage:
     name: Trigger Next Stage Deployment
     runs-on: ubuntu-latest
-    needs: [prepare_deployment_info, deploy_and_validate]
-    if: success() && needs.deploy_and_validate.outputs.deployment_status == 'success' # Check specific output
+    needs: [prepare_deployment_info, gather_deployment_outputs]
+    if: success() && needs.gather_deployment_outputs.outputs.deployment_status == 'success'
 
     steps:
       - name: Promote DEV to TEST
         if: github.event.inputs.target_environment_type == 'dev' && needs.prepare_deployment_info.outputs.is_main_pipeline == 'true'
         uses: benc-uk/workflow-dispatch@v1
         with:
-          workflow: ${{ github.workflow }} # Triggers itself (sampleapp-cd.yml)
+          workflow: ${{ github.workflow }}
           token: ${{ secrets.WORKFLOW_DISPATCH_PAT }}
           inputs: |
             {
@@ -212,7 +252,7 @@ jobs:
         if: github.event.inputs.target_environment_type == 'test'
         uses: benc-uk/workflow-dispatch@v1
         with:
-          workflow: ${{ github.workflow }} # Triggers itself (sampleapp-cd.yml)
+          workflow: ${{ github.workflow }}
           token: ${{ secrets.WORKFLOW_DISPATCH_PAT }}
           inputs: |
             {
@@ -224,23 +264,19 @@ jobs:
 
   report_cd_status:
     name: Report CD Status
-    runs-on: ubuntu-latest
-    needs: [prepare_deployment_info, deploy_and_validate]
+    needs: [prepare_deployment_info, gather_deployment_outputs]
     if: always()
-
-    steps:
-      - name: Notify CD Status
-        uses: InwardEcho/workflow-templates/.github/workflows/reusable-observability-hooks.yml@main
-        with:
-          status: ${{ needs.deploy_and_validate.result }} # Overall job status
-          workflow-name: "${{ github.workflow }} - ${{ github.event.inputs.target_environment_type }}"
-          environment-name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
-          version-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
-          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          message-details: |
-            Deployment to ${{ github.event.inputs.target_environment_type }} status: ${{ needs.deploy_and_validate.result }}.
-            App Deploy step status: ${{ needs.deploy_and_validate.outputs.deployment_status }}.
-            Canary outcome (if Prod): ${{ needs.deploy_and_validate.outputs.canary_outcome }}.
-          notification-channel: 'slack'
-        secrets:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    uses: InwardEcho/workflow-templates/.github/workflows/reusable-observability-hooks.yml@main
+    with:
+      status: ${{ needs.gather_deployment_outputs.outputs.overall_job_result }}
+      workflow-name: "${{ github.workflow }} - ${{ github.event.inputs.target_environment_type }}"
+      environment-name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+      version-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
+      run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      message-details: |
+        Deployment to ${{ github.event.inputs.target_environment_type }} status: ${{ needs.gather_deployment_outputs.outputs.overall_job_result }}.
+        App Deploy step status: ${{ needs.gather_deployment_outputs.outputs.deployment_status }}.
+        Canary outcome (if Prod): ${{ needs.gather_deployment_outputs.outputs.canary_outcome }}.
+      notification-channel: 'slack'
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
