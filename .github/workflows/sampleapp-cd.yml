@@ -1,0 +1,246 @@
+name: SampleApp CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_to_deploy:
+        description: 'Version to deploy (e.g., 1.2.3 or 1.2.3-feature-xyz.5)'
+        required: true
+        type: string
+      source_artifact_name:
+        description: 'Name of the build artifact to download (e.g., release-1.2.3-app-package)'
+        required: true
+        type: string
+      target_environment_type:
+        description: 'Logical environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write # For OIDC with cloud providers
+
+concurrency:
+  group: sampleapp-cd-${{ github.event.inputs.target_environment_type }}-${{ github.event.inputs.version_to_deploy }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  prepare_deployment_info:
+    name: Prepare Deployment Information
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_info.outputs.version }}
+      artifact_name: ${{ steps.get_info.outputs.artifact_name }}
+      is_main_pipeline: ${{ steps.get_info.outputs.is_main_pipeline }}
+      github_environment_name: ${{ steps.get_info.outputs.github_environment_name }}
+      environment_url_var_name: ${{ steps.get_info.outputs.environment_url_var_name }}
+      azure_app_name_var_name: ${{ steps.get_info.outputs.azure_app_name_var_name }}
+
+    steps:
+      - name: Consolidate and Validate Trigger Info
+        id: get_info
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.version_to_deploy }}"
+          ARTIFACT_NAME="${{ github.event.inputs.source_artifact_name }}"
+          TARGET_ENV_TYPE="${{ github.event.inputs.target_environment_type }}"
+          IS_MAIN_PIPELINE="false"
+          if [[ "$ARTIFACT_NAME" == release-* ]]; then
+            IS_MAIN_PIPELINE="true"
+          fi
+
+          if [[ -z "$VERSION" || -z "$ARTIFACT_NAME" || -z "$TARGET_ENV_TYPE" ]]; then
+            echo "::error::Version, Artifact Name, or Target Environment Type is missing. Cannot proceed."
+            exit 1
+          fi
+
+          GITHUB_ENV_NAME=""
+          ENV_URL_VAR_NAME=""
+          AZURE_APP_NAME_VAR_NAME=""
+
+          case "$TARGET_ENV_TYPE" in
+            dev)
+              GITHUB_ENV_NAME="Development"
+              ENV_URL_VAR_NAME="DEV_ENVIRONMENT_URL"
+              AZURE_APP_NAME_VAR_NAME="DEV_AZURE_APP_NAME"
+              ;;
+            test)
+              GITHUB_ENV_NAME="Test"
+              ENV_URL_VAR_NAME="TEST_ENVIRONMENT_URL"
+              AZURE_APP_NAME_VAR_NAME="TEST_AZURE_APP_NAME"
+              ;;
+            prod)
+              GITHUB_ENV_NAME="Production"
+              ENV_URL_VAR_NAME="PROD_ENVIRONMENT_URL"
+              AZURE_APP_NAME_VAR_NAME="PROD_AZURE_APP_NAME"
+              ;;
+            *)
+              echo "::error::Invalid target_environment_type: $TARGET_ENV_TYPE"
+              exit 1
+              ;;
+          esac
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "is_main_pipeline=$IS_MAIN_PIPELINE" >> $GITHUB_OUTPUT
+          echo "github_environment_name=$GITHUB_ENV_NAME" >> $GITHUB_OUTPUT
+          echo "environment_url_var_name=$ENV_URL_VAR_NAME" >> $GITHUB_OUTPUT
+          echo "azure_app_name_var_name=$AZURE_APP_NAME_VAR_NAME" >> $GITHUB_OUTPUT
+
+          echo "Deploying Version: $VERSION to $GITHUB_ENV_NAME"
+          echo "Using Artifact: $ARTIFACT_NAME"
+          echo "Is Main Pipeline (for DEV trigger): $IS_MAIN_PIPELINE"
+
+  deploy_and_validate:
+    name: Deploy to ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+    runs-on: ubuntu-latest
+    needs: prepare_deployment_info
+    environment:
+      name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+      url: ${{ vars[needs.prepare_deployment_info.outputs.environment_url_var_name] || format('https://{0}.example.com/app-{1}', github.event.inputs.target_environment_type, needs.prepare_deployment_info.outputs.version) }}
+
+    outputs: # Output for observability
+      deployment_status: ${{ steps.app_deploy_prod_canary.outputs.status || steps.app_deploy_non_prod.outputs.status || 'unknown' }}
+      canary_outcome: ${{ steps.app_deploy_prod_canary.outputs.canary_status || 'N/A' }}
+
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Application Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare_deployment_info.outputs.artifact_name }}
+          path: ./app-to-deploy
+
+      - name: Apply Infrastructure (Terraform)
+        id: terraform_apply
+        uses: InwardEcho/workflow-templates/.github/workflows/reusable-iac-terraform.yml@main
+        with:
+          working-directory: 'infra' # Adjusted for SampleApp
+          terraform-command: 'apply'
+          environment: ${{ github.event.inputs.target_environment_type }}
+          var-file: '${{ github.event.inputs.target_environment_type }}.tfvars' # Adjusted for SampleApp
+          backend-config-file: '${{ github.event.inputs.target_environment_type }}.backend.hcl' # Adjusted for SampleApp
+          apply-auto-approve: ${{ github.event.inputs.target_environment_type == 'prod' && 'false' || 'true' }}
+          terraform-version: 'latest'
+        secrets:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Apply Database Migrations
+        id: db_migration
+        if: steps.terraform_apply.outputs.status == 'success'
+        uses: InwardEcho/workflow-templates/.github/workflows/reusable-database-migration-efcore.yml@main
+        with:
+          efcore-project-path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj' # Adjusted for SampleApp
+          environment: ${{ github.event.inputs.target_environment_type }}
+          connection-string: ${{ secrets.DB_CONNECTION_STRING }}
+          backup-required: ${{ github.event.inputs.target_environment_type == 'prod' && 'true' || 'false' }}
+        secrets:
+          _placeholder_for_secret_passing_to_reusable: "Ensure reusable workflow handles this correctly if it expects secrets directly"
+
+      - name: Placeholder for App Deploy Logic (before conditional steps)
+        id: app_deploy_placeholder
+        if: steps.db_migration.outputs.status == 'success'
+        run: echo "DB migration successful, proceeding to app deployment logic."
+
+      - name: Deploy Application to PROD (Canary Strategy)
+        id: app_deploy_prod_canary
+        if: steps.app_deploy_placeholder.conclusion == 'success' && github.event.inputs.target_environment_type == 'prod'
+        uses: InwardEcho/workflow-templates/.github/workflows/reusable-canary-deployment.yml@main
+        with:
+          environment-name: 'prod'
+          artifact-path: './app-to-deploy'
+          version: ${{ needs.prepare_deployment_info.outputs.version }}
+          canary-percentage: ${{ vars.PROD_CANARY_PERCENTAGE || 10 }}
+          observation-period-minutes: ${{ vars.PROD_CANARY_OBSERVATION_MINUTES || 30 }}
+          health-check-url-pattern: ${{ vars.PROD_CANARY_HEALTH_CHECK_URL_PATTERN }}
+          primary-deployment-target-type: 'azure-app-service' # Example, adjust as needed
+          azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
+          rollback-on-failure: true
+        secrets:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
+
+      - name: Deploy Application to DEV/TEST (Direct Strategy)
+        id: app_deploy_non_prod
+        if: steps.app_deploy_placeholder.conclusion == 'success' && (github.event.inputs.target_environment_type == 'dev' || github.event.inputs.target_environment_type == 'test')
+        uses: InwardEcho/workflow-templates/.github/workflows/reusable-deploy-environment.yml@main
+        with:
+          environment-name: ${{ github.event.inputs.target_environment_type }}
+          artifact-path: './app-to-deploy'
+          deployment-target-type: 'azure-app-service' # Example, adjust as needed
+          version-being-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
+          azure-app-name: ${{ vars[needs.prepare_deployment_info.outputs.azure_app_name_var_name] }}
+        secrets:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
+
+  trigger_next_stage:
+    name: Trigger Next Stage Deployment
+    runs-on: ubuntu-latest
+    needs: [prepare_deployment_info, deploy_and_validate]
+    if: success() && needs.deploy_and_validate.outputs.deployment_status == 'success' # Check specific output
+
+    steps:
+      - name: Promote DEV to TEST
+        if: github.event.inputs.target_environment_type == 'dev' && needs.prepare_deployment_info.outputs.is_main_pipeline == 'true'
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: ${{ github.workflow }} # Triggers itself (sampleapp-cd.yml)
+          token: ${{ secrets.WORKFLOW_DISPATCH_PAT }}
+          inputs: |
+            {
+              "version_to_deploy": "${{ needs.prepare_deployment_info.outputs.version }}",
+              "source_artifact_name": "${{ needs.prepare_deployment_info.outputs.artifact_name }}",
+              "target_environment_type": "test"
+            }
+          ref: ${{ github.ref }}
+
+      - name: Promote TEST to PROD
+        if: github.event.inputs.target_environment_type == 'test'
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: ${{ github.workflow }} # Triggers itself (sampleapp-cd.yml)
+          token: ${{ secrets.WORKFLOW_DISPATCH_PAT }}
+          inputs: |
+            {
+              "version_to_deploy": "${{ needs.prepare_deployment_info.outputs.version }}",
+              "source_artifact_name": "${{ needs.prepare_deployment_info.outputs.artifact_name }}",
+              "target_environment_type": "prod"
+            }
+          ref: ${{ github.ref }}
+
+  report_cd_status:
+    name: Report CD Status
+    runs-on: ubuntu-latest
+    needs: [prepare_deployment_info, deploy_and_validate]
+    if: always()
+
+    steps:
+      - name: Notify CD Status
+        uses: InwardEcho/workflow-templates/.github/workflows/reusable-observability-hooks.yml@main
+        with:
+          status: ${{ needs.deploy_and_validate.result }} # Overall job status
+          workflow-name: "${{ github.workflow }} - ${{ github.event.inputs.target_environment_type }}"
+          environment-name: ${{ needs.prepare_deployment_info.outputs.github_environment_name }}
+          version-deployed: ${{ needs.prepare_deployment_info.outputs.version }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          message-details: |
+            Deployment to ${{ github.event.inputs.target_environment_type }} status: ${{ needs.deploy_and_validate.result }}.
+            App Deploy step status: ${{ needs.deploy_and_validate.outputs.deployment_status }}.
+            Canary outcome (if Prod): ${{ needs.deploy_and_validate.outputs.canary_outcome }}.
+          notification-channel: 'slack'
+        secrets:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
