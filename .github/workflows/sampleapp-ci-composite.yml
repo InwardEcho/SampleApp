@@ -1,4 +1,4 @@
-name: SampleApp CI
+name: SampleApp CI using Composite Action
 
 on:
   push:
@@ -15,7 +15,7 @@ permissions:
 jobs:
   call_ci:
     name: Call CI Workflow
-    uses: InwardEcho/workflow-templates/.github/workflows/ci-unified.yml@main
+    uses: InwardEcho/workflow-templates/.github/workflows/ci-unified-composite.yml@main
     with:
       logLevel: 'info' # Or your preferred log level
       enable_cd: true
