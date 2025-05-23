@@ -43,7 +43,7 @@ jobs:
       deployment_scope: ${{ github.event.inputs.deployment_scope }}
       
       # Application-specific parameters
-      db_migration_project_path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj'
+      # db_migration_project_path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj'
 
     secrets:
       # Pass all necessary secrets

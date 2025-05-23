@@ -18,7 +18,7 @@ jobs:
     uses: InwardEcho/workflow-templates/.github/workflows/ci-unified.yml@main
     with:
       logLevel: 'info' # Or your preferred log level
-      enable_cd: true
+      enable_cd: false
       cd_workflow: '.github/workflows/sampleapp-cd-composite.yml'
       # solution_path: 'SampleApp.sln' # Optional: default = **/*.sln
       # dotnet_version_to_use: '8.0.x' # Optional: default = 9.0.x
