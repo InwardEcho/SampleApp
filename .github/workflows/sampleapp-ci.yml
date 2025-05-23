@@ -26,5 +26,3 @@ jobs:
       WORKFLOW_DISPATCH_PAT: ${{ secrets.WORKFLOW_DISPATCH_PAT }} # Required for triggering CD
       NUGET_FEED_AUTH_TOKEN_CI: ${{ secrets.NUGET_FEED_AUTH_TOKEN_CI }} # Optional
       SLACK_WEBHOOK_URL_CI: ${{ secrets.SLACK_WEBHOOK_URL_CI }} # Optional
-
-      
