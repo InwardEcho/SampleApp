@@ -5,11 +5,11 @@ on:
     inputs:
       run_number:
         description: 'Run number for the CI pipeline'
-        required: true
+        required: false
         type: string
       source_artifact_name:
         description: 'Name of the build artifact to download (e.g., release-1.2.3-app-package)'
-        required: true
+        required: false
         type: string
       deployment_scope:
         description: 'Defines the sequence of environments to deploy to'
@@ -32,14 +32,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  debug:
+    name: debug
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug Environment Variables
+        shell: bash
+        run: |
+          echo "AZURE_CLIENT_ID is: ${{ vars.AZURE_CLIENT_ID_DEV  }}"
+          echo "AZURE_TENANT_ID is: ${{ vars.AZURE_TENANT_ID_DEV }}"
+          echo "AZURE_SUBSCRIPTION_ID is: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}"
+          echo "AZURE_CLIENT_SECRET is set: ${{ secrets.AZURE_CLIENT_SECRET_DEV != '' }}"
+
   call_sequential_cd:
     name: SampleApp CD
     uses: InwardEcho/workflow-templates/.github/workflows/sequential-cd-workflow-composite.yml@main
 
     with:
       # Core inputs from workflow_dispatch
-      source_run_id: ${{ github.event.inputs.run_number }}
-      source_artifact_name: ${{ github.event.inputs.source_artifact_name }}
+      source_run_id: 11
+      # source_run_id: ${{ github.event.inputs.run_number }}
+      source_artifact_name: 'test'
+      # source_artifact_name: ${{ github.event.inputs.source_artifact_name }}
       deployment_scope: ${{ github.event.inputs.deployment_scope }}
       
 
