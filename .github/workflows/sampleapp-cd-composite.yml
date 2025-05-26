@@ -87,7 +87,7 @@ jobs:
       terraform_directory: 'infra'
       terraform-vars: ${{ needs.debug.outputs.terraform_vars }}
       terraform-var-file: dev.tfvars
-
+      dotnet_version: 9.0.x
       # azure_app_name: 'sampleapp'
     secrets:
       # Pass all necessary secrets
