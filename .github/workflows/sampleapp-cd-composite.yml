@@ -60,6 +60,13 @@ jobs:
       # Application-specific parameters
       # db_migration_project_path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj'
       terraform_directory: 'infra'
+      terraform-vars: |
+        {
+          "sql_admin_login": "${{ vars.sql_admin_login_dev }}",
+          "sql_admin_password": "${{ secrets.sql_admin_password_dev }}"
+        }
+      terraform-var-file: dev.tfvars
+
       # azure_app_name: 'sampleapp'
     secrets:
       # Pass all necessary secrets
