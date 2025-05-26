@@ -63,6 +63,12 @@ jobs:
         env:
           SQL_ADMIN_LOGIN: ${{ vars.sql_admin_login_dev }}
           SQL_ADMIN_PASSWORD: ${{ secrets.sql_admin_password_dev }}
+      - name: show vars
+        run: |
+          echo "terraform-vars ${{ steps.tf_vars.outputs.terraform-vars }}"
+          echo "terraform_vars ${{ steps.tf_vars.outputs.terraform_vars }}"
+
+
   call_sequential_cd:
     name: SampleApp CD
     uses: InwardEcho/workflow-templates/.github/workflows/sequential-cd-workflow-composite.yml@main
