@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   call_sequential_cd:
-    name: Call Sequential CD Workflow for SampleApp
+    name: SampleApp CD
     uses: InwardEcho/workflow-templates/.github/workflows/sequential-cd-workflow-composite.yml@main
 
     with:
