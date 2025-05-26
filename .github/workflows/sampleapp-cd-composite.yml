@@ -49,17 +49,22 @@ jobs:
       - name: Prepare Terraform Variables
         id: tf_vars
         run: |
-          # Build JSON object with proper escaping
-          terraform_vars=$(jq -n \
-            --arg sql_login "${{ vars.sql_admin_login_dev }}" \
-            --arg sql_password "${{ secrets.sql_admin_password_dev }}"
-            '{
-              sql_admin_login: $sql_login,
-              sql_admin_password: $sql_password
-            }')
+          # Build the terraform-vars string using environment variables
+          terraform_vars=""
+          terraform_vars+="sql_admin_login=${SQL_ADMIN_LOGIN}"$'\n'
+          terraform_vars+="sql_admin_password=${SQL_ADMIN_PASSWORD}"$'\n'
+          terraform_vars+="location=${LOCATION}"$'\n'
+          terraform_vars+="app_name=${APP_NAME}"
           
-          echo "terraform_vars=$terraform_vars" >> $GITHUB_OUTPUT
-
+          # Use EOF delimiter to handle multiline output
+          {
+            echo "terraform-vars<<EOF"
+            echo "$terraform_vars"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+        env:
+          SQL_ADMIN_LOGIN: ${{ vars.sql_admin_login_dev }}
+          SQL_ADMIN_PASSWORD: ${{ secrets.sql_admin_password_dev }}
   call_sequential_cd:
     name: SampleApp CD
     uses: InwardEcho/workflow-templates/.github/workflows/sequential-cd-workflow-composite.yml@main
