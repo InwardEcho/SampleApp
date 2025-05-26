@@ -22,18 +22,6 @@ variable "location_short" {
   # No default, should be provided
 }
 
-variable "azure_tenant_id" {
-  type        = string
-  description = "The Azure Tenant ID where the resources are deployed."
-  # No default, should be provided (e.g., via environment variable TF_VAR_azure_tenant_id or .tfvars)
-}
-
-variable "azure_admin_object_id" {
-  type        = string
-  description = "The Object ID of the user or service principal that will be granted initial admin access to Key Vault."
-  # No default, should be provided
-}
-
 variable "sql_admin_login" {
   type        = string
   description = "The administrator login name for the SQL Server."

@@ -45,7 +45,7 @@ jobs:
 
       # Application-specific parameters
       # db_migration_project_path: 'src/SampleApp.WebApp/SampleApp.WebApp.csproj'
-      # terraform_directory: 'terraform'
+      terraform_directory: 'infra'
       # azure_app_name: 'sampleapp'
     secrets:
       # Pass all necessary secrets

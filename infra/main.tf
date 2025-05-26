@@ -1,22 +1,5 @@
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~&gt;3.0"
-    }
-  }
-  backend "azurerm" {
-    # Configuration for resource_group_name, storage_account_name, container_name, and key
-    # will be provided via a backend configuration file (e.g., dev.backend.hcl)
-    # during `terraform init -backend-config=dev.backend.hcl`
-  }
-}
-
-provider "azurerm" {
-  features {}
-  # Credentials will be supplied by the GitHub Actions workflow
-  # or local environment variables for local testing.
-}
+data "azurerm_client_config" "current" {
+} 
 
 resource "azurerm_resource_group" "rg" {
   name     = "rg-${var.application_name}-${var.environment_name}-${var.location_short}"
@@ -35,14 +18,14 @@ resource "azurerm_key_vault" "kv" {
   name                        = "kv-${var.application_name}-${var.environment_name}-${var.location_short}"
   location                    = azurerm_resource_group.rg.location
   resource_group_name         = azurerm_resource_group.rg.name
-  tenant_id                   = var.azure_tenant_id
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
   sku_name                    = "standard" # Or "premium"
   soft_delete_retention_days  = 7
   purge_protection_enabled    = false # Consider true for production
 
   access_policy {
-    tenant_id = var.azure_tenant_id
-    object_id = var.azure_admin_object_id # Service Principal or User ObjectID to manage KV
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
 
     key_permissions = [
       "Get",
