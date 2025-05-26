@@ -53,7 +53,7 @@ jobs:
           terraform_vars=""
           terraform_vars+="sql_admin_login=${SQL_ADMIN_LOGIN}"$'\n'
           terraform_vars+="sql_admin_password=${SQL_ADMIN_PASSWORD}"$'\n'
-          echo terraform_vars
+          echo $terraform_vars
           # Use EOF delimiter to handle multiline output
           {
             echo "terraform-vars<<EOF"
