@@ -1,6 +1,6 @@
 # Example variable values for the 'dev' environment
 
-application_name = "sampleapp"
+application_name = "s345ampleapp"
 environment_name = "dev"
 location         = "UK South"
 location_short   = "uks"
