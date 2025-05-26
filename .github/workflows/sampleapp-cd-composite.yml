@@ -49,9 +49,9 @@ jobs:
       # azure_app_name: 'sampleapp'
     secrets:
       # Pass all necessary secrets
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID_DEV }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET_DEV }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID_DEV }}
       DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
+      AZURE_CREDENTIALS_APP_SERVICE: ${{ secrets.AZURE_CREDENTIALS_APP_SERVICE }}
