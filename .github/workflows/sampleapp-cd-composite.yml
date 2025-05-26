@@ -36,7 +36,7 @@ jobs:
     name: debug
     runs-on: ubuntu-latest
     outputs: 
-      terraform_vars: ${{ steps.tf_vars.outputs.terraform_vars }}
+      terraform_vars: ${{ steps.tf_vars.outputs.terraform-vars }}
 
     steps:
       - name: Debug Environment Variables
