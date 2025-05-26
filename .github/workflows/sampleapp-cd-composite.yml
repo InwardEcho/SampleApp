@@ -51,11 +51,9 @@ jobs:
         run: |
           # Build the terraform-vars string using environment variables
           terraform_vars=""
-          terraform_vars+="sql_admin_login=${SQL_ADMIN_LOGIN}"$'\n'
+          terraform_vars+="sql_admin_login=${env.SQL_ADMIN_LOGIN}"$'\n'
           terraform_vars+="sql_admin_password=${SQL_ADMIN_PASSWORD}"$'\n'
-          terraform_vars+="location=${LOCATION}"$'\n'
-          terraform_vars+="app_name=${APP_NAME}"
-          
+          echo terraform_vars
           # Use EOF delimiter to handle multiline output
           {
             echo "terraform-vars<<EOF"
