@@ -15,5 +15,4 @@ jobs:
   call_ci:
     name: Call Workflow
     uses: InwardEcho/workflow-templates/.github/workflows/fed.yml@main
-    with:
-      secrets: inherited
+    secrets: inherit
