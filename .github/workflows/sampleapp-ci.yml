@@ -10,9 +10,19 @@ on:
 permissions:
   id-token: write
   contents: read
-
 jobs:
-  call_ci:
-    name: Call Workflow
-    uses: InwardEcho/workflow-templates/.github/workflows/fed.yml@main
-    secrets: inherit
+  deploy:
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+      
+      - name: Deploy resources
+        run: |
+          # Your deployment commands here
+          az group list
