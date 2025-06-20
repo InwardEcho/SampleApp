@@ -13,7 +13,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: test
+    environment: dev
     steps:
       - name: Azure login
         uses: azure/login@v1
